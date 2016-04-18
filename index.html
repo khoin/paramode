@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>PARAMODE</title>
+	<style type="text/css">
+		html, body, canvas 
+		{
+			width: 100%; height: 100%;
+			padding: 0px; margin: 0px;
+			overflow:hidden;
+		}
+		input {
+			position: fixed; top: 0; left:0; z-index: 999;
+		}
+	</style>
+</head>
+<body>
+<input type="button" onclick="source.play()" value="play"></input>
+	<canvas id="c"></canvas>
+	<script type="text/javascript">
+		'use strict';
+		const 	d = document,
+			  	c_= d.getElementById("c"),
+			  	c = c_.getContext("2d"),
+			  	w = c_.width  = window.innerWidth,
+			  	h = c_.height = window.innerHeight;
+
+	  	class Path   
+	  	{
+	  		constructor(context) 
+	  		{
+		  		if(!(context instanceof CanvasRenderingContext2D)) throw new Error("Invalid Rendering Context");
+
+		  		this.context= context;
+		  		let nodes 	= [];
+		  		let closed	= false;
+
+		  		this.getNodes = function ()
+		  		{
+		  			return nodes;
+		  		}
+
+		  		this.getPathClose = function ()
+		  		{
+		  			return closed;
+		  		}
+
+		  		this.define = function (n, c) 
+			  	{
+			  		if(!(n instanceof Array)) throw new Error("Nodes are provided in arrays.");
+
+			  		nodes 	= n;
+			  		closed	= c && true;
+
+			  		return this;
+			  	}
+
+			  	this.addNode = function(n)
+			  	{
+			  		if(!(n instanceof Array)) throw new Error("Invalid Node");
+			  		if(!(typeof n[0] == "number" && typeof n[1] == "number" ) ) throw new Error("Invalid Node Coordination");
+
+			  		this.getNodes().push(n);
+			  		return this;
+			  	}
+
+		  		return this;
+	  		}
+
+	  		stroke()
+	  		{
+	  			var a = this.getNodes(),
+	  				i = 0;
+	  				
+		  		this.context.beginPath();
+		  		this.context.moveTo( a[0][0], a[0][1] );
+
+		  		while ( ++i < a.length ) this.context.lineTo( a[i][0], a[i][1] );
+		  		
+		  		if( this.getPathClose() ) this.context.closePath();
+		  		this.context.stroke();
+			}
+	  	}
+
+	  	class StereoVisualizer
+	  	{
+	  		constructor(ccontext, acontext, ffts)
+	  		{
+	  			if(!(ccontext instanceof CanvasRenderingContext2D)) throw new Error("Invalid Rendering Context (1st Parameter)");
+	  			if(!(acontext instanceof AudioContext)) 			throw new Error("Invalid Audio Context (2nd Parameter)");
+	  			
+	  			this.audioContext 	= acontext;
+	  			this.drawContext	= ccontext;
+	  			let sourceNode 		= undefined;
+	  			let splitter 		= this.audioContext.createChannelSplitter(2);
+	  			let leftAnalyser 	= this.audioContext.createAnalyser();
+	  			let rightAnalyser	= this.audioContext.createAnalyser();
+	  			let fftSize 		= ffts || 2048;
+	  			let bufferLength 	= 0;
+	  			let leftData 		= new Uint8Array();
+	  			let rightData 		= new Uint8Array();
+
+	  			this.input = function(node) 
+	  			{
+	  				if(!(node instanceof AudioNode))	throw new Error("Input is not an AudioNode");
+	  				if( node.channelCount !== 2 ) 		throw new Error("Input is not a stereo node");
+	  				sourceNode = node;
+	  				node.connect(splitter);
+	  				splitter.connect(leftAnalyser ,0);
+	  				splitter.connect(rightAnalyser,1);
+	  				return this;
+	  			}
+
+	  			this.setFFTSize = function(size) 
+	  			{
+	  				fftSize = (Math.log2(size) % 1 == 0)? Math.min(32768,Math.max(size,32)) : 2048;
+	  				leftAnalyser.fftSize = rightAnalyser.fftSize = fftSize;
+	  				//Set Left and Right DataArrays again
+	  				bufferLength 	= leftAnalyser.frequencyBinCount;
+	  				
+	  				leftData		= new Uint8Array(bufferLength);
+	  				rightData 		= new Uint8Array(bufferLength);
+	  				return this;
+	  			}
+
+	  			this.setFFTSize(ffts);
+
+	  			this.draw = function(cx, cy, w, h, mode)
+	  			{	
+	  				if(!(sourceNode instanceof AudioNode)) console.warn("No AudioNode is connected.");
+	  				var path  	= new Path(this.drawContext);
+
+					leftAnalyser .getByteTimeDomainData(leftData );
+					rightAnalyser.getByteTimeDomainData(rightData);
+
+					for( var i=0; i < bufferLength; i++ ) { 
+						if (mode == "polar")
+						{
+							path.addNode([ w/128*(leftData[i] -128) * Math.cos(2*Math.PI*i/bufferLength) + cx,
+										   h/128*(rightData[i]-128) * Math.sin(2*Math.PI*i/bufferLength) + cy]);
+						}
+						else 
+						{
+							path.addNode([ 	(w/128)*(leftData[i] -128) + cx, 
+											(h/128)*(rightData[i]-128) + cy]);
+						}
+					}
+					path.stroke();
+
+	  			}
+	  			
+	  		}
+	  	}
+
+	  	//Create Source Audio
+	  	var source = new Audio();
+	  	source.crossOrigin = "anonymous";
+	  	source.src = "https://api.audiotool.com/track/para_mode/play.ogg";
+	  	
+	  	var a = new AudioContext();
+
+	  	//Create AudioNode
+	  	var aNode = a.createMediaElementSource(source);
+	  	aNode.connect(a.destination);
+	  	
+	  	var test = new StereoVisualizer(c,a);	
+	  	test.input(aNode);  	
+	  	
+	  	// Draw BG Black
+	  	function black() {
+	  		c.fillStyle = "black";
+	  		c.fillRect(0,0,w,h);
+	  	}
+
+	  	var h_ = h/2;
+	  	var w_ = w/2;
+	  	
+	  	function loop() {
+	  		black();
+
+	  		c.strokeStyle = "white";
+	  		c.lineWidth = 3;
+	  		
+	  		test.draw(w_,h_, 512, 512, "polar");
+
+	  		requestAnimationFrame(loop);
+	  	}
+	  	loop();
+	</script>
+</body>
+</html>
